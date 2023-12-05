@@ -17,13 +17,14 @@ from paho.mqtt.client import Client
 import BAC0
 from BAC0.core.devices.local.models import ObjectFactory
 from bacpypes.object import BinaryInputObject, BinaryOutputObject, AnalogInputObject, AnalogOutputObject, AnalogValueObject
+from __version__ import APPVER, APPNAME
 
 # -----------------------------------------------------------------------------
 # Globals
 # -----------------------------------------------------------------------------
 
-APP_NAME = "LoRaWAN to BACnet Bridge"
-APP_VERSION = "v1.0.0"
+APP_NAME = APPNAME
+APP_VERSION = APPVER
 
 # -----------------------------------------------------------------------------
 # Configuration
