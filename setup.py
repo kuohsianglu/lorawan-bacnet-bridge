@@ -2,15 +2,13 @@
 
 from setuptools import find_packages, setup
 
-from lw2bacnet.__version__ import APPVER, APPNAME
-
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
     name='lw2bacnet',
-    version=APPVER,
-    description=APPNAME,
+    version='1.0.0',
+    description='LoRaWAN to BACnet Bridge',
     long_description=long_description,
     long_description_content_type="text/markdown",
     entry_points={
