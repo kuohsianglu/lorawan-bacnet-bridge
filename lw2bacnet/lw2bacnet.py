@@ -24,6 +24,7 @@ from bacpypes.object import BinaryInputObject, BinaryOutputObject, AnalogInputOb
 
 APP_NAME = 'LoRaWAN to BACnet Bridge'
 APP_VERSION = 'v1.0.0'
+CFG_ROOT = '/etc/lw2bacnet'
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -32,7 +33,7 @@ APP_VERSION = 'v1.0.0'
 class Config():
 
     _data = flatdict.FlatDict({})
-    _file = "config/config.yml"
+    _file = f"{CFG_ROOT}/config/config.yml"
     _dirty = False
 
     def __init__(self):
@@ -212,7 +213,7 @@ def get_data(msg, force_decode=False, decoder='cayenne.js'):
     if (force_decode) or (payload_decoded == False):
 
         # Decode raw payload
-        decoder_file = f'config/decoders/{decoder}'
+        decoder_file = f'{CFG_ROOT}/config/decoders/{decoder}'
         with open(decoder_file) as f:
             decoder = f.readlines()
         context = quickjs.Context()
@@ -348,7 +349,7 @@ def update_objects(device, msg):
 def load_datatypes():
     datatypes_filename = config.get('datatypes.filename', 'datatypes.yml')
     try:
-        with open(f'config/{datatypes_filename}', "r") as f:
+        with open(f'{CFG_ROOT}/config/{datatypes_filename}', "r") as f:
             data =  yaml.load(f, Loader=yaml.loader.SafeLoader)
         return data['datatypes']
     except FileNotFoundError:
@@ -387,7 +388,7 @@ def main():
     run = True
 
     # Copy defaults
-    copy_recursive("./templates", "./config")
+    copy_recursive(f"{CFG_ROOT}/templates", f"{CFG_ROOT}/config")
 
     global config
     global bacnet_app
