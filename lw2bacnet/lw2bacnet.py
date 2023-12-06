@@ -382,20 +382,18 @@ def copy_recursive(source_base_path, target_base_path):
             if not Path(target_name).is_file():
                 shutil.copy(source_name, target_name)
 
-
-# -----------------------------------------------------------------------------
-# Entrypoint
-# -----------------------------------------------------------------------------
-
-if __name__ == "__main__":
+def main():
 
     run = True
 
     # Copy defaults
     copy_recursive("./templates", "./config")
 
-    # Load configuration file
+    global config
+    global bacnet_app
+
     config = Config()
+    bacnet_app = BACnetApp()
 
     # Set logging level based on settings (10=DEBUG, 20=INFO, ...)
     level=config.get("logging.level", logging.INFO)
@@ -405,7 +403,6 @@ if __name__ == "__main__":
 
     # BACnet setup
     try:
-        bacnet_app = BACnetApp()
         bacnet_app.create_device(
             ip=config.get('bacnet.ip', get_ip()),
             port=config.get('bacnet.port', 47808),
@@ -445,3 +442,7 @@ if __name__ == "__main__":
     if run:
         mqtt_client.run()
         bacnet_app.run()
+
+
+if __name__ == "__main__":
+    main()
