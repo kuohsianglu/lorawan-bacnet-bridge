@@ -407,7 +407,13 @@ def main():
         bacnet_app.create_device(
             ip=config.get('bacnet.ip', get_ip()),
             port=config.get('bacnet.port', 47808),
-            mask=config.get('bacnet.mask', 24)
+            mask=config.get('bacnet.mask', 24),
+            deviceId=config.get('bacnet.devid', 9000),
+            vendorName=config.get('bacnet.vendor', 'RAKwireless'),
+            localObjName=config.get('bacnet.objname', 'WisGateV2'),
+            description=config.get('bacnet.desc', 'LoRaWAN BACnet Gateway'),
+            modelName=config.get('bacnet.model', 'WisGateV2 BACnet Gateway'),
+            firmwareRevision=config.get('bacnet.fwver', '2.0.0'),
         )
         load_bacnet_devices()
     except:
