@@ -392,6 +392,7 @@ def main():
 
     global config
     global bacnet_app
+    global datatypes
 
     config = Config()
     bacnet_app = BACnetApp()
