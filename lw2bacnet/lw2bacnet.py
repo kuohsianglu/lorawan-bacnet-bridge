@@ -93,6 +93,7 @@ class MQTTClient(Client):
         def connect_callback_default(client, userdata, flags, rc):
             if rc == 0:
                 logging.debug("[MQTT] Connected to MQTT Broker!")
+                self.subscribe(config.get('mqtt.topic', 'v3/+/devices/+/up'))
             else:
                 logging.error("[MQTT] Failed to connect, return code %d", rc)
 
@@ -205,7 +206,11 @@ def get_data(msg, force_decode=False, decoder='cayenne.js'):
         port = payload['uplink_message']['f_port']
         gateways = payload['uplink_message']['rx_metadata']
     else:
-        payload_raw = base64.b64decode(payload['data'])
+        try:
+            payload_raw = base64.b64decode(payload['data'])
+        except Exception:
+            logging.error(f"[Decode] payload without data field")
+            payload_raw = []
         payload_decoded = payload.get('object', False)
         port = payload['fPort']
         gateways = payload['rxInfo']
@@ -225,7 +230,13 @@ def get_data(msg, force_decode=False, decoder='cayenne.js'):
             }
         """)
         command = "f([{}], {})".format(",".join([str(b) for b in payload_raw]), port)
-        response = json.loads(context.eval(command).json())
+
+        try:
+            response = json.loads(context.eval(command).json())
+        except Exception:
+            logging.error(f"[Decode] {decoder_file} parsing error!")
+            response = {'data':[]}
+
         response = response['data']
 
     else:
@@ -432,7 +443,6 @@ def main():
             config.get('mqtt.password'),
             userdata=bacnet_app.device
         )
-        mqtt_client.subscribe(config.get('mqtt.topic', 'v3/+/devices/+/up'))
         mqtt_client.on_message = mqtt_message_callback
     except:
         logging.error(f"[MQTT] Error connecting to MQTT server at {config.get('mqtt.server', 'localhost')}:{config.get('mqtt.port', 1883)}")
