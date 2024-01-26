@@ -11,7 +11,9 @@ import math
 import quickjs
 import socket
 import shutil
+import hashlib
 from pathlib import Path
+from .bacnetdb import *
 
 from paho.mqtt.client import Client
 import BAC0
@@ -299,13 +301,15 @@ def update_object(device, device_id, element):
 
     object_id = f"{device_id}-{name}"
 
+    oid = hashlib.md5(object_id.encode())
+
     try:
 
         # Update the BACnet object value
         device[object_id].presentValue = value
+        bacnetdb_update_object(object_id, value)
 
-        # We are updating the current value but not saving it to disk just yet (lazysaving)
-        config.set(f"devices.{device_id}.objects.{name}.value", value)
+        logging.debug(f"[DB] Update Obj {oid.hexdigest()}: {value}")
 
     except:
 
@@ -317,12 +321,6 @@ def update_object(device, device_id, element):
             bacnet_type = datatypes[datatype].get('type')
             bacnet_units = datatypes[datatype].get('units', 'noUnits')
 
-            # Add object to configuration
-            config.set(f"devices.{device_id}.objects.{name}.type", bacnet_type)
-            config.set(f"devices.{device_id}.objects.{name}.name", object_id)
-            config.set(f"devices.{device_id}.objects.{name}.units", bacnet_units)
-            config.set(f"devices.{device_id}.objects.{name}.value", value)
-
             # Add it also to banet app
             bacnet_app.add_object(
                 type = globals()[bacnet_type],
@@ -331,6 +329,10 @@ def update_object(device, device_id, element):
                 value = value,
                 units = bacnet_units
             )
+
+            # Add to DB
+            bacnet_obj=[object_id, device_id, object_id, bacnet_type, bacnet_units, value]
+            bacnetdb_insert_object(bacnet_obj)
 
             # Flag to save & reload objects
             save = True
@@ -347,6 +349,7 @@ def update_objects(device, msg):
     data = get_data(msg, decode, decoder)
     logging.debug(f"[MQTT] Message from {device_id}: {data}")
     save = False
+    bacnetdb_insert_device(device_id, decoder)
 
     for element in data:
         save |= update_object(device, device_id, element)
@@ -447,6 +450,8 @@ def main():
     except:
         logging.error(f"[MQTT] Error connecting to MQTT server at {config.get('mqtt.server', 'localhost')}:{config.get('mqtt.port', 1883)}")
         run = False
+
+    bacnetdb_init_table()
 
     # Load default datatypes
     datatypes = load_datatypes()
