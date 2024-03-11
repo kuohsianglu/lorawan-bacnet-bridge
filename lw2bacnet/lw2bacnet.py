@@ -12,13 +12,14 @@ import quickjs
 import socket
 import shutil
 import hashlib
+import re
 from pathlib import Path
 from .bacnetdb import *
 
 from paho.mqtt.client import Client
 import BAC0
 from BAC0.core.devices.local.models import ObjectFactory
-from bacpypes.object import BinaryInputObject, BinaryOutputObject, AnalogInputObject, AnalogOutputObject, AnalogValueObject
+from bacpypes.object import BinaryValueObject, BinaryInputObject, BinaryOutputObject, AnalogInputObject, AnalogOutputObject, AnalogValueObject
 
 # -----------------------------------------------------------------------------
 # Globals
@@ -148,9 +149,14 @@ class BACnetApp():
         self.device._update_local_cov_task.task._log.setLevel(level)
 
     def add_object(self, type, name, description, value, units):
+        prop = {"units": units}
+        bin_obj = re.compile("binary*")
+        if bin_obj.match(type.objectType):
+            prop = None
+
         self.objects = ObjectFactory(
             type, self.id, name,
-            properties = {"units": units},
+            properties = prop,
             description = description,
             presentValue = value
         )
@@ -246,15 +252,6 @@ def get_data(msg, force_decode=False, decoder='cayenne.js'):
         # get the pre-decoded payload
         response = payload_decoded
 
-    # Add metadata objects
-    best_rssi = -200
-    best_snr = -20
-    for gateway in gateways:
-        best_rssi = max(gateway.get('rssi', best_rssi), best_rssi)
-        best_snr = max(gateway.get('snr', gateway.get('loRaSNR', best_snr)), best_snr)
-    response.append({'name': 'rssi', 'type': 250, 'value': best_rssi})
-    response.append({'name': 'snr', 'type': 250, 'value': best_snr})
-
     return response
 
 def get_device_id(msg):
@@ -288,18 +285,15 @@ def update_object(device, device_id, element):
     name = element.get('name')
     datatype = element.get('type', 0)
     value = element.get('value', 0)
+    ch = element.get('channel', 0)
 
-    # Recursive call for dict values
-    if isinstance(value, dict):
-        for key in value:
-            sub_element = {}
-            sub_element['type'] = datatype
-            sub_element['name'] = f"{name}-{key}"
-            sub_element['value'] = value[key]
-            save |= update_object(device, device_id, sub_element)
+    dev_dtype = load_dev_datatype(device_id)
+    if dev_dtype == None:
         return save
 
-    object_id = f"{device_id}-{name}"
+    dev_datatype = dev_dtype
+
+    object_id = f"{device_id}-{ch}"
 
     oid = hashlib.md5(object_id.encode())
 
@@ -315,11 +309,11 @@ def update_object(device, device_id, element):
 
         logging.debug(f"[BACNET] Object {object_id} not found, creating it")
 
-        if datatype in datatypes:
+        if ch in dev_datatype:
 
             # Get BACnet object characteristics
-            bacnet_type = datatypes[datatype].get('type')
-            bacnet_units = datatypes[datatype].get('units', 'noUnits')
+            bacnet_type = dev_datatype[ch].get('type')
+            bacnet_units = dev_datatype[ch].get('units', 'noUnits')
 
             # Add it also to banet app
             bacnet_app.add_object(
@@ -344,8 +338,19 @@ def update_objects(device, msg):
     logging.debug(f"[MQTT] Message received for {msg.topic}")
 
     device_id = get_device_id(msg)
-    decode = config.get(f"devices.{device_id}.decode", True)
-    decoder = config.get(f"devices.{device_id}.decoder", "cayenne.js")
+    decode = True
+    decoder = f"{device_id}.js"
+    codec_file = f'{CFG_ROOT}/config/decoders/{decoder}'
+
+    if not os.path.exists(codec_file):
+        dev_codec = load_dev_codec(device_id)
+        if dev_codec == None:
+            decoder = "cayenne.js"
+            logging.debug(f"[Codec] No Codec. Use default decoder.")
+        else:
+            with open(codec_file, 'a') as file:
+                file.write(dev_codec.strip())
+
     data = get_data(msg, decode, decoder)
     logging.debug(f"[MQTT] Message from {device_id}: {data}")
     save = False
@@ -355,9 +360,6 @@ def update_objects(device, msg):
         save |= update_object(device, device_id, element)
 
     if save:
-        config.set(f"devices.{device_id}.decode", decode)
-        config.set(f"devices.{device_id}.decoder", decoder)
-        config.save()
         bacnet_app.load()
 
 def load_datatypes():
@@ -368,6 +370,26 @@ def load_datatypes():
         return data['datatypes']
     except FileNotFoundError:
         logging.error(f"[MAIN] Could not load {datatypes_filename} file")
+
+    return None
+
+def load_dev_datatype(device_id):
+    try:
+        with open(f'{CFG_ROOT}/config/devices/{device_id}.yml', "r") as f:
+            data =  yaml.load(f, Loader=yaml.loader.SafeLoader)
+        return data['datatype']
+    except FileNotFoundError:
+        logging.error(f"[MAIN] Could not load {device_id}.yml file")
+
+    return None
+
+def load_dev_codec(device_id):
+    try:
+        with open(f'{CFG_ROOT}/config/devices/{device_id}.yml', "r") as f:
+            data =  yaml.load(f, Loader=yaml.loader.SafeLoader)
+        return data['codec']
+    except FileNotFoundError:
+        logging.error(f"[MAIN] Could not load {device_id}.yml file")
 
     return None
 
@@ -406,7 +428,7 @@ def main():
 
     global config
     global bacnet_app
-    global datatypes
+    global dev_datatype
 
     config = Config()
     bacnet_app = BACnetApp()
@@ -452,11 +474,6 @@ def main():
         run = False
 
     bacnetdb_init_table()
-
-    # Load default datatypes
-    datatypes = load_datatypes()
-    if datatypes == None:
-        run = False
 
     # Save defaults
     config.save()
