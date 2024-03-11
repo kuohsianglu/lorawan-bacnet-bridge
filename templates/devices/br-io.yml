@@ -1,0 +1,64 @@
+codec: "var TemperatureDecode = function(data, size){var array = new Uint8Array(data);var\
+  \ view = new DataView(array.buffer); value = view.getInt16(0) * 0.100000;return\
+  \ value};\nvar TemperatureEncode = function(value){var view = new DataView(); var\
+  \ scaled = Math.round(value / 0.100000); view.setInt16(0,value); return view.buffer;\
+  \ };\nvar HighPreciseHumidityDecode = function(data, size){var array = new Uint8Array(data);var\
+  \ view = new DataView(array.buffer); value = view.getUint16(0) * 0.100000;return\
+  \ value};\nvar HighPreciseHumidityEncode = function(value){var view = new DataView();\
+  \ var scaled = Math.round(value / 0.100000); view.setUint16(0,value); return view.buffer;\
+  \ };\nvar DigitalOutputDecode = function(data, size){return data[0] == 0 ? 0 : 1};\n\
+  var DigitalOutputEncode = function(value){return value == 0 ? [0x00] : [0x01] };\n\
+  \nvar Dict = {103: { size: 2, decoder: TemperatureDecode, encoder: TemperatureEncode},112:\
+  \ { size: 2, decoder: HighPreciseHumidityDecode, encoder: HighPreciseHumidityEncode},1:\
+  \ { size: 1, decoder: DigitalOutputDecode, encoder: DigitalOutputEncode},};\nvar\
+  \ ChanDict = { 1 : { type: 103, name : \" \", unit: \"\xB0C\"}, 2 : { type: 112,\
+  \ name : \" \", unit: \"%\"}, 209 : { type: 1, name : \"DO1\", unit: \"\"}, 210\
+  \ : { type: 1, name : \"DO2\", unit: \"\"}, 211 : { type: 1, name : \"DO3\", unit:\
+  \ \"\"}, 212 : { type: 1, name : \"DO4\", unit: \"\"},};\n\nfunction Decode(fPort,\
+  \ data, variables) {\n    var values = [];\n    var idx = 0;\n    while(idx < data.length)\
+  \ {\n        var channel = data[idx];\n        var chanUnit = ChanDict[channel]\n\
+  \        var type = data[idx + 1];\n        var Obj = Dict[type];\n        var value\
+  \ = Obj.decoder(data.slice(idx + 2, idx + 2 + Obj.size), Obj.size)\n        var\
+  \ out = {name: chanUnit.name, channel: channel,  value: value, unit: chanUnit.unit};\n\
+  \        values.push(out);\n        idx += (2 + Obj.size)\n    }\n    return values\n\
+  }\n\nfunction Encode(data, variables) {\n    var channel = data.channel;\n    var\
+  \ value = data.value;\n    var chanUnit = ChanDict[channel]\n    var ipso = Dict[chanUnit.type]\n\
+  \    var data = ipso.encoder(value)\n    var bytes = []\n    bytes.push(channel)\n\
+  \    bytes.push(type)\n    bytes = bytes.concat(data)\n\n    return bytes\n}\n\n\
+  \nfunction decodeUplink(input) {\n    return {\n      data: Decode(input.fPort,\
+  \ input.bytes, input.variables)\n    }\n}\n\nfunction encodeDownlink(input) {\n\
+  \    return {\n      bytes: Encode(input.data, input.variables)\n    }\n}"
+datatype:
+  1:
+    name: Battery Temp
+    type: AnalogInputObject
+    units: degreesCelsius
+  2:
+    name: Env Humidity
+    type: AnalogInputObject
+    units: percentRelativeHumidity
+  209:
+    name: DO1
+    type: BinaryValueObject
+  210:
+    name: DO2
+    type: BinaryValueObject
+  211:
+    name: DO3
+    type: BinaryValueObject
+  212:
+    name: DO4
+    type: BinaryValueObject
+lorawan:
+  adrAlgorithm: LoRa Only
+  applicationEui: '0000000000000000'
+  applicationKey: 11223344556677889900AABBCCDDEEFF
+  deviceEui: AC1F09FFFE0DA167
+  macVersion: LORAWAN_1_0_3
+  region: AS923
+  regionalParametetsRevision: RP002_1_0_3
+  supportClassB: false
+  supportClassC: true
+  supportOTAA: true
+model: RAK2461-DO01
+profileVersion: 1.0.0
