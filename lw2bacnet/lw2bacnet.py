@@ -140,13 +140,18 @@ class BACnetApp():
     def __init__(self):
         self.objects = None
         self.device = None
+        self.mqtt = None
 
     def create_device(self, ip=None, port=None, mask=24, **params):
         self.device = BAC0.lite(ip=ip, port=port, mask=mask, **params)
+        self.device.this_application.wp_callback_init(wp_complete)
 
     def setLoggingLevel(self, level):
         self.device._log.setLevel(level)
         self.device._update_local_cov_task.task._log.setLevel(level)
+
+    def set_mqtt_client(self, client):
+        self.mqtt = client
 
     def add_object(self, type, name, description, value, units):
         prop = {"units": units}
@@ -282,7 +287,7 @@ def load_bacnet_devices():
 def update_object(device, device_id, element):
 
     save = False
-    name = element.get('name')
+    # name = element.get('name')
     datatype = element.get('type', 0)
     value = element.get('value', 0)
     ch = element.get('channel', 0)
@@ -295,15 +300,13 @@ def update_object(device, device_id, element):
 
     object_id = f"{device_id}-{ch}"
 
-    oid = hashlib.md5(object_id.encode())
-
     try:
 
         # Update the BACnet object value
         device[object_id].presentValue = value
-        bacnetdb_update_object(object_id, value)
+        bacnetdb_update_datapoint(object_id, value)
 
-        logging.debug(f"[DB] Update Obj {oid.hexdigest()}: {value}")
+        logging.debug(f"[DB] Update Obj {object_id}: {value}")
 
     except:
 
@@ -314,19 +317,21 @@ def update_object(device, device_id, element):
             # Get BACnet object characteristics
             bacnet_type = dev_datatype[ch].get('type')
             bacnet_units = dev_datatype[ch].get('units', 'noUnits')
+            bacnet_name = dev_datatype[ch].get('name', None)
+            fport = dev_datatype[ch].get('fport', None)
 
             # Add it also to banet app
             bacnet_app.add_object(
                 type = globals()[bacnet_type],
                 name = object_id,
-                description = name,
+                description = bacnet_name,
                 value = value,
                 units = bacnet_units
             )
 
             # Add to DB
-            bacnet_obj=[object_id, device_id, object_id, bacnet_type, bacnet_units, value]
-            bacnetdb_insert_object(bacnet_obj)
+            bacnet_obj=[object_id, device_id, bacnet_name, bacnet_type, bacnet_units, value, fport, True]
+            bacnetdb_insert_datapoint(bacnet_obj)
 
             # Flag to save & reload objects
             save = True
@@ -419,6 +424,90 @@ def copy_recursive(source_base_path, target_base_path):
             if not Path(target_name).is_file():
                 shutil.copy(source_name, target_name)
 
+def get_app_id(dev_eui):
+    db_cmd = f"sudo -u postgres /usr/bin/psql -h localhost --no-align --quiet --tuples-only -c"
+    query_cmd = f"\"SELECT application_id FROM device WHERE dev_eui=bytea '\\x{dev_eui}'\" chirpstack"
+    psql_cmd = f"{db_cmd} {query_cmd}"
+    appid = os.popen(psql_cmd).read().strip('\n')
+
+    return appid
+
+def encode_data(deveui, channel, value):
+    decoder_file = f'{CFG_ROOT}/config/decoders/{deveui}.js'
+    with open(decoder_file) as f:
+        decoder = f.readlines()
+    context = quickjs.Context()
+    context.eval(''.join(decoder))
+    context.eval("""
+        function f(ch, val) {
+            var chanUnit = ChanDict[ch];
+            var ipso = Dict[chanUnit.type];
+            var value = ipso.encoder(val);
+            var bytes = [];
+            bytes.push(ch);
+            bytes.push(chanUnit.type);
+            bytes = bytes.concat(value);
+            return bytes;
+        }
+    """)
+    command = "f({}, {})".format(channel, value)
+    logging.debug(f"[Encode] cmd: {command}")
+
+    response = json.loads(context.eval(command).json())
+    logging.debug(f"[Encode] resp: {response}")
+    return response
+
+def lorawan_dl_msg(dev_eui, f_port, channel, value):
+    app_id = get_app_id(dev_eui)
+    mqtt_topic = f"application/{app_id}/device/{dev_eui}/command/down"
+
+    raw_data = encode_data(dev_eui, channel, value)
+
+    ch = format(channel, '02x')
+    val = format(raw_data[2], '02x')
+    type = format(raw_data[1], '02x')
+
+    ipso_str = f"{ch}{type}{val}"
+    ipso_bytes = bytes.fromhex(ipso_str)
+    data_b64 = base64.b64encode(ipso_bytes)
+    data_str = data_b64.decode()
+    payload = {
+        "devEui": dev_eui,
+        "confirmed": True,
+        "fPort": f_port,
+        "data": data_str
+    }
+
+    logging.debug(f"[MQTT_PUB] raw data: {raw_data}, ipsostr: {ipso_str}")
+
+    if bacnet_app.mqtt:
+        bacnet_app.mqtt.publish(mqtt_topic, json.dumps(payload))
+        logging.debug(f"[MQTT_PUB] topic: {mqtt_topic}, payload: {payload}")
+
+def wp_complete(obj_name, obj_val):
+    if obj_val == "active":
+        val = 1
+    elif obj_val == "inactive":
+        val = 0
+    else:
+        val = obj_val
+    deveui = obj_name.split('-')[0]
+    ch_str = obj_name.split('-')[1]
+    ch = int(ch_str)
+
+    dev_dtype = load_dev_datatype(deveui)
+    if dev_dtype == None:
+        return
+
+    if ch in dev_dtype:
+        fport = dev_dtype[ch].get('fport', None)
+        if fport == None:
+            logging.debug(f"[DL] Unable to write data point, invalid fport!")
+            return
+        logging.debug(f"[DL] Downlink fport: {fport}")
+        lorawan_dl_msg(deveui, fport, ch, val)
+
+
 def main():
 
     run = True
@@ -469,6 +558,7 @@ def main():
             userdata=bacnet_app.device
         )
         mqtt_client.on_message = mqtt_message_callback
+        bacnet_app.set_mqtt_client(mqtt_client)
     except:
         logging.error(f"[MQTT] Error connecting to MQTT server at {config.get('mqtt.server', 'localhost')}:{config.get('mqtt.port', 1883)}")
         run = False
