@@ -24,8 +24,8 @@ codec: "var TemperatureDecode = function(data, size){var array = new Uint8Array(
   }\n\nfunction Encode(data, variables) {\n    var channel = data.channel;\n    var\
   \ value = data.value;\n    var chanUnit = ChanDict[channel]\n    var ipso = Dict[chanUnit.type]\n\
   \    var data = ipso.encoder(value)\n    var bytes = []\n    bytes.push(channel)\n\
-  \    bytes.push(type)\n    bytes = bytes.concat(data)\n\n    return bytes\n}\n\n\
-  \nfunction decodeUplink(input) {\n    return {\n      data: Decode(input.fPort,\
+  \    bytes.push(chanUnit.type)\n    bytes = bytes.concat(data)\n\n    return bytes\n\
+  }\n\n\nfunction decodeUplink(input) {\n    return {\n      data: Decode(input.fPort,\
   \ input.bytes, input.variables)\n    }\n}\n\nfunction encodeDownlink(input) {\n\
   \    return {\n      bytes: Encode(input.data, input.variables)\n    }\n}"
 datatype:
@@ -40,15 +40,19 @@ datatype:
   209:
     name: DO1
     type: BinaryValueObject
+    fport: 1
   210:
     name: DO2
     type: BinaryValueObject
+    fport: 1
   211:
     name: DO3
     type: BinaryValueObject
+    fport: 1
   212:
     name: DO4
     type: BinaryValueObject
+    fport: 1
 lorawan:
   adrAlgorithm: LoRa Only
   applicationEui: '0000000000000000'
