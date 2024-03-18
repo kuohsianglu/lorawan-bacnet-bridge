@@ -16,13 +16,15 @@ def bacnetdb_init_table():
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS object (
-                id TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS datapoint (
+                dp_id TEXT PRIMARY KEY,
                 dev_eui BYTEA NOT NULL,
-                name VARCHAR(100) NOT NULL,
+                name VARCHAR(100),
                 type VARCHAR(32) NOT NULL,
                 units VARCHAR(32) NOT NULL,
                 value FLOAT8 NOT NULL,
+                fport INT,
+                cov BOOLEAN,
                 FOREIGN KEY (dev_eui)
                     REFERENCES device (eui)
                     ON UPDATE CASCADE ON DELETE CASCADE
@@ -66,16 +68,16 @@ def bacnetdb_insert_device(deveui, dcoder):
         if conn is not None:
             conn.close()
 
-def bacnetdb_insert_object(obj):
-    sql = """INSERT INTO object(id, dev_eui, name, type, units, value)
-                VALUES(md5(%s), decode(%s,'hex'),%s,%s,%s,%s)
-                ON CONFLICT (id) DO NOTHING;"""
+def bacnetdb_insert_datapoint(obj):
+    sql = """INSERT INTO datapoint(dp_id, dev_eui, name, type, units, value, fport, cov)
+                VALUES(%s, decode(%s,'hex'),%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (dp_id) DO NOTHING;"""
     conn = None
     try:
         conn = conn_bacnetdb()
         cur = conn.cursor()
 
-        cur.execute(sql, (obj[0], obj[1], obj[2], obj[3], obj[4],obj[5],))
+        cur.execute(sql, (obj[0], obj[1], obj[2], obj[3], obj[4],obj[5],obj[6],obj[7]))
 
         conn.commit()
         cur.close()
@@ -86,10 +88,10 @@ def bacnetdb_insert_object(obj):
         if conn is not None:
             conn.close()
 
-def bacnetdb_update_object(oid, new_value):
-    sql = """UPDATE object
+def bacnetdb_update_datapoint(oid, new_value):
+    sql = """UPDATE datapoint
                 SET value = %s
-                WHERE id = md5(%s);"""
+                WHERE dp_id = %s;"""
     conn = None
     try:
         conn = conn_bacnetdb()
