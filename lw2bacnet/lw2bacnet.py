@@ -13,6 +13,9 @@ import socket
 import shutil
 import hashlib
 import re
+import fcntl
+import struct
+import csv
 from pathlib import Path
 from .bacnetdb import *
 
@@ -28,6 +31,7 @@ from bacpypes.object import BinaryValueObject, BinaryInputObject, BinaryOutputOb
 APP_NAME = 'LoRaWAN to BACnet Bridge'
 APP_VERSION = 'v1.0.0'
 CFG_ROOT = '/etc/lw2bacnet'
+DP_CSV = '/tmp/dp.csv'
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -207,6 +211,21 @@ def get_ip():
         s.close()
     return IP
 
+
+def get_mask():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        iface = "eth0"
+        subnet_mask = socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x891b, struct.pack('256s', bytes(iface, 'utf-8')))[20:24])
+    except Exception:
+        subnet_mask = '255.255.255.0'
+
+    return(sum([ bin(int(bits)).count("1") for bits in subnet_mask.split(".") ]))
+
+def get_netmask(ifname):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x891b, struct.pack('256s',ifname))[20:24])
+
 def get_data(msg, force_decode=False, decoder='cayenne.js'):
 
     # Get payload in JSON
@@ -263,40 +282,41 @@ def get_device_id(msg):
     return msg.topic.split('/')[3]
 
 def load_bacnet_devices():
+    dump_dp_to_csv()
 
     # Unload them all first
     bacnet_app.unload()
     bacnet_app.clear_objects()
 
-    devices = (config.unflat()).get('devices', {})
-    for device_id in devices:
-        for key in devices[device_id].get('objects', {}):
-            obj = devices[device_id]['objects'][key]
-            name = obj.get('name', f"{device_id}-{key}")
-            logging.debug(f"[BACNET] Loading {name}")
-            bacnet_app.add_object(
-                type = globals()[obj.get("type", "AnalogInputObject")],
-                name = name,
-                description= "",
-                value = obj.get("value", 0),
-                units = obj.get("units", "noUnits")
-            )
+    if os.path.exists(f"{DP_CSV}"):
+        logging.debug(f"[CSV] file exist {DP_CSV}")
+        with open(f"{DP_CSV}", newline='') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                obj_type = row[3]
+                obj_name = row[0]
+                obj_desc = row[2]
+                obj_units = row[4]
+                if row[2] == None:
+                    obj_desc = ""
+                if row[4] == None:
+                    obj_units = "noUnits"
+                bacnet_app.add_object(
+                    type = globals()[obj_type],
+                    name = obj_name,
+                    description = obj_desc,
+                    value = 0,
+                    units = obj_units
+                )
 
     bacnet_app.load()
 
 def update_object(device, device_id, element):
 
     save = False
-    # name = element.get('name')
     datatype = element.get('type', 0)
     value = element.get('value', 0)
     ch = element.get('channel', 0)
-
-    dev_dtype = load_dev_datatype(device_id)
-    if dev_dtype == None:
-        return save
-
-    dev_datatype = dev_dtype
 
     object_id = f"{device_id}-{ch}"
 
@@ -310,31 +330,7 @@ def update_object(device, device_id, element):
 
     except:
 
-        logging.debug(f"[BACNET] Object {object_id} not found, creating it")
-
-        if ch in dev_datatype:
-
-            # Get BACnet object characteristics
-            bacnet_type = dev_datatype[ch].get('type')
-            bacnet_units = dev_datatype[ch].get('units', 'noUnits')
-            bacnet_name = dev_datatype[ch].get('name', None)
-            fport = dev_datatype[ch].get('fport', None)
-
-            # Add it also to banet app
-            bacnet_app.add_object(
-                type = globals()[bacnet_type],
-                name = object_id,
-                description = bacnet_name,
-                value = value,
-                units = bacnet_units
-            )
-
-            # Add to DB
-            bacnet_obj=[object_id, device_id, bacnet_name, bacnet_type, bacnet_units, value, fport, True]
-            bacnetdb_insert_datapoint(bacnet_obj)
-
-            # Flag to save & reload objects
-            save = True
+        logging.error(f"[BACNET] Object {object_id} not found, it supposed to be created while imported profile form WebUI")
 
     return save
 
@@ -344,7 +340,7 @@ def update_objects(device, msg):
 
     device_id = get_device_id(msg)
     decode = True
-    decoder = f"{device_id}.js"
+    decoder = get_decoder(device_id)
     codec_file = f'{CFG_ROOT}/config/decoders/{decoder}'
 
     if not os.path.exists(codec_file):
@@ -359,34 +355,12 @@ def update_objects(device, msg):
     data = get_data(msg, decode, decoder)
     logging.debug(f"[MQTT] Message from {device_id}: {data}")
     save = False
-    bacnetdb_insert_device(device_id, decoder)
 
     for element in data:
         save |= update_object(device, device_id, element)
 
     if save:
         bacnet_app.load()
-
-def load_datatypes():
-    datatypes_filename = config.get('datatypes.filename', 'datatypes.yml')
-    try:
-        with open(f'{CFG_ROOT}/config/{datatypes_filename}', "r") as f:
-            data =  yaml.load(f, Loader=yaml.loader.SafeLoader)
-        return data['datatypes']
-    except FileNotFoundError:
-        logging.error(f"[MAIN] Could not load {datatypes_filename} file")
-
-    return None
-
-def load_dev_datatype(device_id):
-    try:
-        with open(f'{CFG_ROOT}/config/devices/{device_id}.yml', "r") as f:
-            data =  yaml.load(f, Loader=yaml.loader.SafeLoader)
-        return data['datatype']
-    except FileNotFoundError:
-        logging.error(f"[MAIN] Could not load {device_id}.yml file")
-
-    return None
 
 def load_dev_codec(device_id):
     try:
@@ -433,7 +407,8 @@ def get_app_id(dev_eui):
     return appid
 
 def encode_data(deveui, channel, value):
-    decoder_file = f'{CFG_ROOT}/config/decoders/{deveui}.js'
+    decoder = get_decoder(deveui)
+    decoder_file = f'{CFG_ROOT}/config/decoders/{decoder}'
     with open(decoder_file) as f:
         decoder = f.readlines()
     context = quickjs.Context()
@@ -495,17 +470,15 @@ def wp_complete(obj_name, obj_val):
     ch_str = obj_name.split('-')[1]
     ch = int(ch_str)
 
-    dev_dtype = load_dev_datatype(deveui)
-    if dev_dtype == None:
+    profile_id = get_profile_id(deveui)
+    fport = get_fport(profile_id, ch)
+
+    if fport == None:
+        logging.debug(f"[DL] Unable to write data point, invalid fport!")
         return
 
-    if ch in dev_dtype:
-        fport = dev_dtype[ch].get('fport', None)
-        if fport == None:
-            logging.debug(f"[DL] Unable to write data point, invalid fport!")
-            return
-        logging.debug(f"[DL] Downlink fport: {fport}")
-        lorawan_dl_msg(deveui, fport, ch, val)
+    logging.debug(f"[DL] profile ID: {profile_id} Downlink fport: {fport}")
+    lorawan_dl_msg(deveui, fport, ch, val)
 
 
 def main():
@@ -517,7 +490,6 @@ def main():
 
     global config
     global bacnet_app
-    global dev_datatype
 
     config = Config()
     bacnet_app = BACnetApp()
@@ -533,7 +505,7 @@ def main():
         bacnet_app.create_device(
             ip=config.get('bacnet.ip', get_ip()),
             port=config.get('bacnet.port', 47808),
-            mask=config.get('bacnet.mask', 24),
+            mask=config.get('bacnet.mask', get_mask()),
             deviceId=config.get('bacnet.devid', 9000),
             vendorName=config.get('bacnet.vendor', 'RAKwireless'),
             localObjName=config.get('bacnet.objname', 'WisGateV2'),
@@ -562,8 +534,6 @@ def main():
     except:
         logging.error(f"[MQTT] Error connecting to MQTT server at {config.get('mqtt.server', 'localhost')}:{config.get('mqtt.port', 1883)}")
         run = False
-
-    bacnetdb_init_table()
 
     # Save defaults
     config.save()
