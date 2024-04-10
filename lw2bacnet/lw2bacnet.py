@@ -297,9 +297,7 @@ def load_bacnet_devices():
                 obj_name = row[0]
                 obj_desc = row[2]
                 obj_units = row[4]
-                if row[2] == None:
-                    obj_desc = ""
-                if row[4] == None:
+                if len(row[4]) == 0:
                     obj_units = "noUnits"
                 bacnet_app.add_object(
                     type = globals()[obj_type],
