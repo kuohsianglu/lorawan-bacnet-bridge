@@ -75,6 +75,79 @@ def get_decoder(dev_eui):
 
     return val[0]
 
+def get_dp_type(dpid):
+    sql = """SELECT type
+                FROM datapoint
+                WHERE dp_id = %s;"""
+    conn = None
+    val = None
+    try:
+        conn = conn_bacnetdb()
+        cur = conn.cursor()
+
+        cur.execute(sql, (dpid,))
+        val = cur.fetchone()
+
+        conn.commit()
+        cur.close()
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        logging.error(f"[psycopg]: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return val[0]
+
+def get_dp_name(dpid):
+    sql = """SELECT name
+                FROM datapoint
+                WHERE dp_id = %s;"""
+    conn = None
+    val = None
+    try:
+        conn = conn_bacnetdb()
+        cur = conn.cursor()
+
+        cur.execute(sql, (dpid,))
+        val = cur.fetchone()
+
+        conn.commit()
+        cur.close()
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        logging.error(f"[psycopg]: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return val[0]
+
+def get_dp_units(dpid):
+    sql = """SELECT units
+                FROM datapoint
+                WHERE dp_id = %s;"""
+    conn = None
+    val = None
+    try:
+        conn = conn_bacnetdb()
+        cur = conn.cursor()
+
+        cur.execute(sql, (dpid,))
+        val = cur.fetchone()
+
+        conn.commit()
+        cur.close()
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        logging.error(f"[psycopg]: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return val[0]
+
+
 def get_fport(prof_id, ch):
     sql = """SELECT fport
                 FROM profile_datatypes

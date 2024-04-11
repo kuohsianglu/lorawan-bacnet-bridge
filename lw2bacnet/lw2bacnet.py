@@ -328,7 +328,26 @@ def update_object(device, device_id, element):
 
     except:
 
-        logging.error(f"[BACNET] Object {object_id} not found, it supposed to be created while imported profile form WebUI")
+        logging.debug(f"[BACNET] Object {object_id} not found, created it")
+
+        obj_type = get_dp_type(object_id)
+        obj_name = object_id
+        obj_desc = get_dp_name(object_id)
+        obj_val = value
+        obj_units = get_dp_units(object_id)
+
+        if obj_units == None:
+            obj_units = "noUnits"
+
+        bacnet_app.add_object(
+            type = globals()[obj_type],
+            name = obj_name,
+            description = obj_desc,
+            value = obj_val,
+            units = obj_units
+        )
+
+        save = True
 
     return save
 
