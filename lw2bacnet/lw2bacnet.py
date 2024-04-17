@@ -157,19 +157,19 @@ class BACnetApp():
     def set_mqtt_client(self, client):
         self.mqtt = client
 
-    def add_object(self, type, name, description, value, units):
+    def add_object(self, type, name, description, value, units, bid):
         prop = {"units": units}
         bin_obj = re.compile("binary*")
         if bin_obj.match(type.objectType):
             prop = None
 
         self.objects = ObjectFactory(
-            type, self.id, name,
+            type, int(bid), name,
             properties = prop,
             description = description,
             presentValue = value
         )
-        self.id += 1
+        self.id = int(bid)
 
     def clear_objects(self):
         if self.objects:
@@ -292,11 +292,23 @@ def load_bacnet_devices():
         logging.debug(f"[CSV] file exist {DP_CSV}")
         with open(f"{DP_CSV}", newline='') as f:
             reader = csv.reader(f)
+            prev_eui = ""
             for row in reader:
+                dev_eui = row[1].removeprefix('\\x')
+                dp_id = row[0]
+                dp_name = row[2]
+
+                if dev_eui != prev_eui:
+                    devname = get_dev_name(dev_eui)
+
+                dpname = get_dp_name(dp_id)
+                oname = f"{devname}:{dpname}"
+
                 obj_type = row[3]
-                obj_name = row[0]
-                obj_desc = row[2]
+                obj_name = oname
+                obj_desc = dp_name
                 obj_units = row[4]
+                obj_id = row[8]
                 if len(row[4]) == 0:
                     obj_units = "noUnits"
                 bacnet_app.add_object(
@@ -304,8 +316,10 @@ def load_bacnet_devices():
                     name = obj_name,
                     description = obj_desc,
                     value = 0,
-                    units = obj_units
+                    units = obj_units,
+                    bid = obj_id
                 )
+                prev_eui = dev_eui
 
     bacnet_app.load()
 
@@ -317,34 +331,37 @@ def update_object(device, device_id, element):
     ch = element.get('channel', 0)
 
     object_id = f"{device_id}-{ch}"
+    devname = get_dev_name(device_id)
+    dpname = get_dp_name(object_id)
+    oname = f"{devname}:{dpname}"
+    bid = get_bacnet_id(object_id)
 
     try:
 
         # Update the BACnet object value
-        device[object_id].presentValue = value
+        device[oname].presentValue = value
         bacnetdb_update_datapoint(object_id, value)
 
-        logging.debug(f"[DB] Update Obj {object_id}: {value}")
+        logging.debug(f"[DB] Update Obj {bid}-{oname}: {value}")
 
     except:
 
-        logging.debug(f"[BACNET] Object {object_id} not found, created it")
+        logging.debug(f"[BACNET] Object {oname} not found, created it")
 
         obj_type = get_dp_type(object_id)
-        obj_name = object_id
-        obj_desc = get_dp_name(object_id)
-        obj_val = value
         obj_units = get_dp_units(object_id)
+        obj_id = get_bacnet_id(object_id)
 
         if obj_units == None:
             obj_units = "noUnits"
 
         bacnet_app.add_object(
             type = globals()[obj_type],
-            name = obj_name,
-            description = obj_desc,
-            value = obj_val,
-            units = obj_units
+            name = oname,
+            description = dpname,
+            value = value,
+            units = obj_units,
+            bid = obj_id
         )
 
         save = True
@@ -423,6 +440,22 @@ def get_app_id(dev_eui):
 
     return appid
 
+def get_dev_name(dev_eui):
+    db_cmd = f"sudo -u postgres /usr/bin/psql -h localhost --no-align --quiet --tuples-only -c"
+    query_cmd = f"\"SELECT name FROM device WHERE dev_eui=bytea '\\x{dev_eui}'\" chirpstack"
+    psql_cmd = f"{db_cmd} {query_cmd}"
+    devname = os.popen(psql_cmd).read().strip('\n')
+
+    return devname
+
+def get_dev_eui_by_name(dev_name):
+    db_cmd = f"sudo -u postgres /usr/bin/psql -h localhost --no-align --quiet --tuples-only -c"
+    query_cmd = f"\"SELECT dev_eui FROM device WHERE name='{dev_name}'\" chirpstack"
+    psql_cmd = f"{db_cmd} {query_cmd}"
+    deveui = os.popen(psql_cmd).read().strip('\n')
+
+    return deveui.removeprefix('\\x')
+
 def encode_data(deveui, channel, value):
     decoder = get_decoder(deveui)
     decoder_file = f'{CFG_ROOT}/config/decoders/{decoder}'
@@ -476,15 +509,20 @@ def lorawan_dl_msg(dev_eui, f_port, channel, value):
         bacnet_app.mqtt.publish(mqtt_topic, json.dumps(payload))
         logging.debug(f"[MQTT_PUB] topic: {mqtt_topic}, payload: {payload}")
 
-def wp_complete(obj_name, obj_val):
+def wp_complete(obj_name, obj_val, obj_id):
     if obj_val == "active":
         val = 1
     elif obj_val == "inactive":
         val = 0
     else:
         val = obj_val
-    deveui = obj_name.split('-')[0]
-    ch_str = obj_name.split('-')[1]
+
+    bid = obj_id[1]
+    dp_id = get_dp_id(bid)
+    logging.debug(f"[DL] BacnetID: {bid}  dpid: {dp_id} ")
+
+    deveui = dp_id.split('-')[0]
+    ch_str = dp_id.split('-')[1]
     ch = int(ch_str)
 
     profile_id = get_profile_id(deveui)

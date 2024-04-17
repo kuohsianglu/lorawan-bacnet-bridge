@@ -172,11 +172,59 @@ def get_fport(prof_id, ch):
 
     return val[0]
 
+def get_dp_id(bid):
+    sql = """SELECT dp_id
+                FROM datapoint
+                WHERE bacnet_id = %s;"""
+    conn = None
+    val = None
+    try:
+        conn = conn_bacnetdb()
+        cur = conn.cursor()
+
+        cur.execute(sql, (bid,))
+        val = cur.fetchone()
+
+        conn.commit()
+        cur.close()
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        logging.error(f"[psycopg]: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return val[0]
+
+def get_bacnet_id(dpid):
+    sql = """SELECT bacnet_id
+                FROM datapoint
+                WHERE dp_id = %s;"""
+    conn = None
+    val = None
+    try:
+        conn = conn_bacnetdb()
+        cur = conn.cursor()
+
+        cur.execute(sql, (dpid,))
+        val = cur.fetchone()
+
+        conn.commit()
+        cur.close()
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        logging.error(f"[psycopg]: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return val[0]
+
 
 def dump_dp_to_csv():
     sql_cmd = (
         """
-        COPY (SELECT * FROM datapoint) to '/tmp/dp.csv' with csv;
+        COPY (SELECT * FROM datapoint ORDER BY bacnet_id ASC) to '/tmp/dp.csv' with csv;
         """
     )
     conn = None
