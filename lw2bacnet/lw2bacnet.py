@@ -465,14 +465,8 @@ def encode_data(deveui, channel, value):
     context.eval(''.join(decoder))
     context.eval("""
         function f(ch, val) {
-            var chanUnit = ChanDict[ch];
-            var ipso = Dict[chanUnit.type];
-            var value = ipso.encoder(val);
-            var bytes = [];
-            bytes.push(ch);
-            bytes.push(chanUnit.type);
-            bytes = bytes.concat(value);
-            return bytes;
+            input = {'channel': ch, 'value': val};
+            return Encode(input);
         }
     """)
     command = "f({}, {})".format(channel, value)
@@ -489,12 +483,7 @@ def lorawan_dl_msg(dev_eui, f_port, channel, value):
     raw_data = encode_data(dev_eui, channel, value)
 
     ch = format(channel, '02x')
-    val = format(raw_data[2], '02x')
-    type = format(raw_data[1], '02x')
-
-    ipso_str = f"{ch}{type}{val}"
-    ipso_bytes = bytes.fromhex(ipso_str)
-    data_b64 = base64.b64encode(ipso_bytes)
+    data_b64 = base64.b64encode(bytes(raw_data))
     data_str = data_b64.decode()
     payload = {
         "devEui": dev_eui,
@@ -503,7 +492,7 @@ def lorawan_dl_msg(dev_eui, f_port, channel, value):
         "data": data_str
     }
 
-    logging.debug(f"[MQTT_PUB] raw data: {raw_data}, ipsostr: {ipso_str}")
+    logging.debug(f"[MQTT_PUB] raw data: {raw_data}")
 
     if bacnet_app.mqtt:
         bacnet_app.mqtt.publish(mqtt_topic, json.dumps(payload))
