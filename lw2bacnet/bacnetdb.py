@@ -147,6 +147,30 @@ def get_dp_units(dpid):
 
     return val[0]
 
+def get_dp_cov(dpid):
+    sql = """SELECT cov
+                FROM datapoint
+                WHERE dp_id = %s;"""
+    conn = None
+    val = None
+    try:
+        conn = conn_bacnetdb()
+        cur = conn.cursor()
+
+        cur.execute(sql, (dpid,))
+        val = cur.fetchone()
+
+        conn.commit()
+        cur.close()
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        logging.error(f"[psycopg]: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return val[0]
+
 
 def get_fport(prof_id, ch):
     sql = """SELECT fport

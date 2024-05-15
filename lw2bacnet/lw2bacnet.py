@@ -157,8 +157,7 @@ class BACnetApp():
     def set_mqtt_client(self, client):
         self.mqtt = client
 
-    def add_object(self, type, name, description, value, units, bid):
-        prop = {"units": units}
+    def add_object(self, type, name, description, value, prop, bid):
         bin_obj = re.compile("binary*")
         if bin_obj.match(type.objectType):
             prop = None
@@ -308,15 +307,22 @@ def load_bacnet_devices():
                 obj_name = oname
                 obj_desc = dp_name
                 obj_units = row[4]
+                obj_cov = row[7]
                 obj_id = row[8]
                 if len(row[4]) == 0:
                     obj_units = "noUnits"
+
+                obj_prop = {"units": obj_units}
+                if len(obj_cov) != 0:
+                    tmp = {"covIncrement": float(obj_cov)}
+                    obj_prop.update(tmp)
+
                 bacnet_app.add_object(
                     type = globals()[obj_type],
                     name = obj_name,
                     description = obj_desc,
                     value = 0,
-                    units = obj_units,
+                    prop = obj_prop,
                     bid = obj_id
                 )
                 prev_eui = dev_eui
@@ -351,16 +357,22 @@ def update_object(device, device_id, element):
         obj_type = get_dp_type(object_id)
         obj_units = get_dp_units(object_id)
         obj_id = get_bacnet_id(object_id)
+        obj_cov = get_dp_cov(object_id)
 
         if obj_units == None:
             obj_units = "noUnits"
+
+        obj_prop = {"units": obj_units}
+        if obj_cov != None:
+            tmp = {"covIncrement": float(obj_cov)}
+            obj_prop.update(tmp)
 
         bacnet_app.add_object(
             type = globals()[obj_type],
             name = oname,
             description = dpname,
             value = value,
-            units = obj_units,
+            prop = obj_prop,
             bid = obj_id
         )
 
