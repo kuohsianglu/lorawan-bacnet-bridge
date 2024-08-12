@@ -22,7 +22,17 @@ from .bacnetdb import *
 from paho.mqtt.client import Client
 import BAC0
 from BAC0.core.devices.local.models import ObjectFactory
-from bacpypes.object import BinaryValueObject, BinaryInputObject, BinaryOutputObject, AnalogInputObject, AnalogOutputObject, AnalogValueObject
+from bacpypes.object import (
+    BinaryValueObject,
+    BinaryInputObject,
+    BinaryOutputObject,
+    AnalogInputObject,
+    AnalogOutputObject,
+    AnalogValueObject,
+    OctetStringValueObject
+)
+from bacpypes.primitivedata import OctetString
+from bacpypes.debugging import xtob
 
 # -----------------------------------------------------------------------------
 # Globals
@@ -309,6 +319,7 @@ def load_bacnet_devices():
                 obj_units = row[4]
                 obj_cov = row[7]
                 obj_id = row[8]
+                obj_val = 0
                 if len(row[4]) == 0:
                     obj_units = "noUnits"
 
@@ -317,11 +328,15 @@ def load_bacnet_devices():
                     tmp = {"covIncrement": float(obj_cov)}
                     obj_prop.update(tmp)
 
+                if obj_type == "OctetStringValueObject":
+                    obj_prop = {"statusFlags": [0,0,0,0]}
+                    obj_val = OctetString(xtob('00'))
+
                 bacnet_app.add_object(
                     type = globals()[obj_type],
                     name = obj_name,
                     description = obj_desc,
-                    value = 0,
+                    value = obj_val,
                     prop = obj_prop,
                     bid = obj_id
                 )
