@@ -359,8 +359,13 @@ def update_object(device, device_id, element):
 
     try:
 
+        objval = value
+        objtype = get_dp_type(object_id)
+        if objtype == "OctetStringValueObject":
+            objval = OctetString(xtob(hex(value)))
+
         # Update the BACnet object value
-        device[oname].presentValue = value
+        device[oname].presentValue = objval
         bacnetdb_update_datapoint(object_id, value)
 
         logging.debug(f"[DB] Update Obj {bid}-{oname}: {value}")
