@@ -155,6 +155,7 @@ class BACnetApp():
         self.objects = None
         self.device = None
         self.mqtt = None
+        self.bac2mqtt = None
 
     def create_device(self, ip=None, port=None, mask=24, **params):
         self.device = BAC0.lite(ip=ip, port=port, mask=mask, **params)
@@ -166,6 +167,9 @@ class BACnetApp():
 
     def set_mqtt_client(self, client):
         self.mqtt = client
+
+    def set_bac2mqtt_client(self, bac2client):
+        self.bac2mqtt = bac2client
 
     def add_object(self, type, name, description, value, prop, bid):
         bin_obj = re.compile("binary*")
@@ -208,28 +212,31 @@ class BACnetApp():
 # -----------------------------------------------------------------------------
 
 def get_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(0)
-    try:
-        # doesn't even have to be reachable
-        s.connect(('8.8.8.8', 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
+    IP = config.get('bacnet.endpoint')
+
+    if IP == None or IP == "0.0.0.0":
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0)
+        try:
+            # doesn't even have to be reachable
+            s.connect(('8.8.8.8', 1))
+            IP = s.getsockname()[0]
+        except Exception:
+            IP = '127.0.0.1'
+        finally:
+            s.close()
+
     return IP
 
 
 def get_mask():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        iface = "eth0"
-        subnet_mask = socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0x891b, struct.pack('256s', bytes(iface, 'utf-8')))[20:24])
-    except Exception:
-        subnet_mask = '255.255.255.0'
+    ip=get_ip()
+    mask_cmd = f"ip addr ls | grep {ip} | awk '{{print $2}}' | cut -d/ -f2"
+    mask = os.popen(mask_cmd).read().strip('\n')
 
-    return(sum([ bin(int(bits)).count("1") for bits in subnet_mask.split(".") ]))
+    logging.debug(f"[BAC0_MASK] IP: {ip} , Subnet mask: {mask}")
+
+    return mask
 
 def get_netmask(ifname):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -320,6 +327,7 @@ def load_bacnet_devices():
                 obj_cov = row[7]
                 obj_id = row[8]
                 obj_val = 0
+
                 if len(row[4]) == 0:
                     obj_units = "noUnits"
 
@@ -329,8 +337,17 @@ def load_bacnet_devices():
                     obj_prop.update(tmp)
 
                 if obj_type == "OctetStringValueObject":
+                    raw_val = int(row[5], 16)
                     obj_prop = {"statusFlags": [0,0,0,0]}
-                    obj_val = OctetString(xtob('00'))
+                    obj_val = OctetString(xtob(hex(raw_val)))
+
+                analog_obj = re.compile("analog*")
+                if analog_obj.match(globals()[obj_type].objectType):
+                    obj_val = float(row[5])
+
+                bin_obj = re.compile("binary*")
+                if bin_obj.match(globals()[obj_type].objectType):
+                    obj_val = int(row[5])
 
                 bacnet_app.add_object(
                     type = globals()[obj_type],
@@ -427,6 +444,11 @@ def update_objects(device, msg):
 
     if save:
         bacnet_app.load()
+
+    if bacnet_app.bac2mqtt:
+        bac2mqtt_topic=config.get('bac2mqtt.topic_uplink', "bacnet/app")
+        bacnet_app.bac2mqtt.publish(bac2mqtt_topic, json.dumps(data))
+        logging.debug(f"[BAC2MQTT_PUB] topic: {bac2mqtt_topic}, payload: {data}")
 
 def load_dev_codec(device_id):
     try:
@@ -579,9 +601,9 @@ def main():
     # BACnet setup
     try:
         bacnet_app.create_device(
-            ip=config.get('bacnet.ip', get_ip()),
+            ip=get_ip(),
             port=config.get('bacnet.port', 47808),
-            mask=config.get('bacnet.mask', get_mask()),
+            mask=get_mask(),
             deviceId=config.get('bacnet.devid', 9000),
             vendorName=config.get('bacnet.vendor', 'RAKwireless'),
             localObjName=config.get('bacnet.objname', 'WisGateV2'),
@@ -591,7 +613,7 @@ def main():
         )
         load_bacnet_devices()
     except:
-        logging.error(f"[BACNET] Error defining BACnet interface at {config.get('bacnet.ip', get_ip())}:{config.get('bacnet.port', 47808)}")
+        logging.error(f"[BACNET] Error defining BACnet interface at {get_ip()}:{config.get('bacnet.port', 47808)}")
         run = False
 
     # MQTT setup
@@ -611,6 +633,24 @@ def main():
         logging.error(f"[MQTT] Error connecting to MQTT server at {config.get('mqtt.server', 'localhost')}:{config.get('mqtt.port', 1883)}")
         run = False
 
+    # BAC2MQTT setup
+    bac2mqtt_run = True
+    try:
+        broker_ip = config.get('bac2mqtt.server')
+
+        if broker_ip != None and broker_ip != "localhost":
+            bac2mqtt_client = MQTTClient(
+                broker_ip,
+                int(config.get('bac2mqtt.port', 1883)),
+                config.get('bac2mqtt.username'),
+                config.get('bac2mqtt.password'),
+                userdata=bacnet_app.device
+            )
+            bacnet_app.set_bac2mqtt_client(bac2mqtt_client)
+    except:
+        bac2mqtt_run = False
+        logging.error(f"[BAC2MQTT] Error connecting to MQTT server at {config.get('bac2mqtt.server', 'localhost')}:{config.get('bac2mqtt.port', 1883)}")
+
     # Save defaults
     config.save()
 
@@ -618,6 +658,9 @@ def main():
     if run:
         mqtt_client.run()
         bacnet_app.run()
+
+        if bac2mqtt_run:
+            bac2mqtt_client.run()
 
 
 if __name__ == "__main__":
