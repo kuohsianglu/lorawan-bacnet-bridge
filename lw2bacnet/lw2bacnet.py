@@ -313,6 +313,7 @@ def load_bacnet_devices():
                 dev_eui = row[1].removeprefix('\\x')
                 dp_id = row[0]
                 dp_name = row[2]
+                dp_val = row[5]
 
                 if dev_eui != prev_eui:
                     devname = get_dev_name(dev_eui)
@@ -336,18 +337,21 @@ def load_bacnet_devices():
                     tmp = {"covIncrement": float(obj_cov)}
                     obj_prop.update(tmp)
 
+                if len(dp_val) == 0:
+                    dp_val = 0
+
                 if obj_type == "OctetStringValueObject":
-                    raw_val = int(row[5], 16)
+                    raw_val = int(dp_val, 16)
                     obj_prop = {"statusFlags": [0,0,0,0]}
                     obj_val = OctetString(xtob(hex(raw_val)))
 
                 analog_obj = re.compile("analog*")
                 if analog_obj.match(globals()[obj_type].objectType):
-                    obj_val = float(row[5])
+                    obj_val = float(dp_val)
 
                 bin_obj = re.compile("binary*")
                 if bin_obj.match(globals()[obj_type].objectType):
-                    obj_val = int(row[5])
+                    obj_val = int(dp_val)
 
                 bacnet_app.add_object(
                     type = globals()[obj_type],
