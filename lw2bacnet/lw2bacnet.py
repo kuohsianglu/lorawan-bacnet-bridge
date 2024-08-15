@@ -341,7 +341,10 @@ def load_bacnet_devices():
                     dp_val = 0
 
                 if obj_type == "OctetStringValueObject":
-                    raw_val = int(dp_val, 16)
+                    if dp_val == 0:
+                        raw_val = 0
+                    else:
+                        raw_val = int(dp_val, 16)
                     obj_prop = {"statusFlags": [0,0,0,0]}
                     obj_val = OctetString(xtob(hex(raw_val)))
 
